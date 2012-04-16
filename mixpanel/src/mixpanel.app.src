@@ -1,0 +1,13 @@
+{application, mixpanel,
+ [
+  {description, "Transmit events to Mixpanel"},
+  {vsn, "1.0.0"},
+  {modules, [mixpanel_app, mixpanel_server, mixpanel_sup]},
+  {registered, [mixpanel_sup]},
+  {applications, [
+                  kernel,
+                  stdlib
+                 ]},
+  {mod, { mixpanel_app, []}},
+  {env, []}
+ ]}.
