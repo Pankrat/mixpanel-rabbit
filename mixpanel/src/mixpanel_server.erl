@@ -3,9 +3,10 @@
 -define(SERVER, ?MODULE).
 
 -include_lib("amqp_client/include/amqp_client.hrl"). 
+
 -define(QUEUE_NAME, <<"mixpanel">>).
 
--record(consumer_state, {connection, channel}).
+-record(consumer_state, {connection, channel, map}).
 
 %% ------------------------------------------------------------------
 %% API Function Exports
@@ -38,7 +39,8 @@ init(_Args) ->
     QDeclare = #'queue.declare'{queue = ?QUEUE_NAME, durable = true},
     #'queue.declare_ok'{queue = Queue} = amqp_channel:call(Channel, QDeclare),
     amqp_channel:subscribe(Channel, #'basic.consume'{queue = Queue}, self()), 
-    {ok, #consumer_state{connection = Connection, channel = Channel}}.
+    Map = dict:new(),
+    {ok, #consumer_state{connection = Connection, channel = Channel, map = Map}}.
 
 handle_call(_Request, _From, State) ->
     {reply, ok, State}.
@@ -51,19 +53,23 @@ handle_info(#'basic.consume_ok'{}, State) ->
 
 handle_info({#'basic.deliver'{delivery_tag = Tag}, 
              #amqp_msg{payload = Payload}},
-            State = #consumer_state{channel = Channel}) -> 
+            State = #consumer_state{map = Map}) -> 
     Data = binary_to_list(Payload),
     Url = string:concat("http://api.mixpanel.com/track/?", Data),
     io:format("DEBUG: ~p~n", [Url]), 
-    {ok, _ReqId} = httpc:request(get, {Url, []}, [], [{sync, false}]),
-    % TODO: Store Url->Tag in dict and acknowledge when response is received
-    amqp_channel:cast(Channel, #'basic.ack'{delivery_tag = Tag}),
-    {noreply, State};
+    {ok, ReqId} = httpc:request(get, {Url, []}, [], [{sync, false}]),
+    % Store ReqId->Tag in dict and acknowledge when response is received
+    NewState = State#consumer_state{map = dict:store(ReqId, Tag, Map)},
+    {noreply, NewState};
 
-handle_info({http, {_RequestId, Result}}, State) ->
+handle_info({http, {ReqId, Result}}, 
+            State = #consumer_state{channel = Channel, map = Map}) ->
+    Tag = dict:fetch(ReqId, Map),
+    amqp_channel:cast(Channel, #'basic.ack'{delivery_tag = Tag}),
     {{_, Code, _}, _Headers, Body} = Result,
     io:format("DEBUG [http]: Code=~p Body=~p~n", [Code, Body]),
-    {noreply, State}.
+    NewState = State#consumer_state{map = dict:erase(ReqId, Map)},
+    {noreply, NewState}.
 
 terminate(_Reason, #consumer_state{connection = Connection, channel = Channel}) ->
     amqp_channel:close(Channel),
