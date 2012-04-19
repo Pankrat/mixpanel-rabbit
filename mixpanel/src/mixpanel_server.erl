@@ -2,7 +2,7 @@
 -behaviour(gen_server).
 -define(SERVER, ?MODULE).
 
--include_lib("amqp_client/include/amqp_client.hrl"). 
+-include_lib("amqp_client/include/amqp_client.hrl").
 
 -define(QUEUE_NAME, <<"mixpanel">>).
 
@@ -54,8 +54,7 @@ handle_info(#'basic.consume_ok'{}, State) ->
 handle_info({#'basic.deliver'{delivery_tag = Tag}, 
              #amqp_msg{payload = Payload}},
             State = #consumer_state{map = Map}) -> 
-    Data = binary_to_list(Payload),
-    Url = string:concat("http://api.mixpanel.com/track/?", Data),
+    Url = mixpanel_url(Payload),
     io:format("DEBUG: ~p~n", [Url]), 
     {ok, ReqId} = httpc:request(get, {Url, []}, [], [{sync, false}]),
     % Store ReqId->Tag in dict and acknowledge when response is received
@@ -83,3 +82,39 @@ code_change(_OldVsn, State, _Extra) ->
 %% Internal Function Definitions
 %% ------------------------------------------------------------------
 
+decode_json(Json) ->
+    jiffy:decode(Json).
+
+encode_json(Struct) ->
+    jiffy:encode(Struct).
+
+add_token(Raw, Token) ->
+    {Data} = decode_json(Raw),
+    Dict = orddict:from_list(Data),
+    {Prop} = orddict:fetch(<<"properties">>, Dict),
+    PropToken = dict:store(token, Token, dict:from_list(Prop)),
+    NewProp = {dict:to_list(PropToken)},
+    NewDict = orddict:store(<<"properties">>, NewProp, Dict),
+    NewData = {orddict:to_list(NewDict)},
+    encode_json(NewData).
+
+mixpanel_url(Payload) ->
+    ModPayload = add_token(Payload, <<"TODO">>),
+    Data = base64:encode_to_string(ModPayload),
+    string:concat("http://api.mixpanel.com/track/?data=", Data).
+
+%%
+%% Tests
+%%
+
+-ifdef(TEST).
+-include_lib("eunit/include/eunit.hrl").
+
+add_token_test() ->
+    <<"{\"properties\":{\"token\":\"Tom\"}}">> = 
+        add_token(<<"{\"properties\":{}}">>, <<"Tom">>),
+    <<"{\"event\":\"lunch\",\"properties\":{\"ip\":\"10.0.0.1\",\"token\":\"Tanya\"}}">> = 
+        add_token(<<"{\"event\":\"lunch\",\"properties\":{\"ip\":\"10.0.0.1\"}}">>, <<"Tanya">>),
+    ok.
+
+-endif.
