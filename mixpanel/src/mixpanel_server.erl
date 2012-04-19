@@ -98,8 +98,12 @@ add_token(Raw, Token) ->
     NewData = {orddict:to_list(NewDict)},
     encode_json(NewData).
 
+get_token() ->
+    {ok, Token} = application:get_env(mixpanel, token),
+    Token.
+
 mixpanel_url(Payload) ->
-    ModPayload = add_token(Payload, <<"TODO">>),
+    ModPayload = add_token(Payload, get_token()),
     Data = base64:encode_to_string(ModPayload),
     string:concat("http://api.mixpanel.com/track/?data=", Data).
 
