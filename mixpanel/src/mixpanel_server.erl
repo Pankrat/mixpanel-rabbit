@@ -88,13 +88,21 @@ decode_json(Json) ->
 encode_json(Struct) ->
     jiffy:encode(Struct).
 
+modify_properties(Properties, Token) ->
+    Dict = dict:from_list(Properties),
+    {Msec, Sec, _} = erlang:now(),
+    UnixTime = Msec * 1000000 + Sec,
+    Inject = [{<<"token">>, Token}, {<<"time">>, UnixTime}],
+    TokenDict = dict:from_list(Inject),
+    Merged = dict:merge(fun(_, V, _) -> V end, Dict, TokenDict),
+    dict:to_list(Merged).
+
 add_token(Raw, Token) ->
     {Data} = decode_json(Raw),
     Dict = orddict:from_list(Data),
     {Prop} = orddict:fetch(<<"properties">>, Dict),
-    PropToken = dict:store(token, Token, dict:from_list(Prop)),
-    NewProp = {dict:to_list(PropToken)},
-    NewDict = orddict:store(<<"properties">>, NewProp, Dict),
+    NewProp = modify_properties(Prop, Token),
+    NewDict = orddict:store(<<"properties">>, {NewProp}, Dict),
     NewData = {orddict:to_list(NewDict)},
     encode_json(NewData).
 
@@ -114,11 +122,16 @@ mixpanel_url(Payload) ->
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
 
+modify_properties_test() ->
+    [{<<"time">>, _}, {<<"token">>, <<"Duke">>}] = modify_properties([], <<"Duke">>),
+    [{<<"time">>, _}, {<<"token">>, <<"Gonzo">>}] = modify_properties([{<<"token">>, <<"Gonzo">>}], <<"Duke">>),
+    [{<<"time">>, 123}, {<<"token">>, <<"Duke">>}] = modify_properties([{<<"time">>, 123}], <<"Duke">>).
+
 add_token_test() ->
-    <<"{\"properties\":{\"token\":\"Tom\"}}">> = 
-        add_token(<<"{\"properties\":{}}">>, <<"Tom">>),
-    <<"{\"event\":\"lunch\",\"properties\":{\"ip\":\"10.0.0.1\",\"token\":\"Tanya\"}}">> = 
-        add_token(<<"{\"event\":\"lunch\",\"properties\":{\"ip\":\"10.0.0.1\"}}">>, <<"Tanya">>),
+    <<"{\"properties\":{\"time\":123,\"token\":\"Tom\"}}">> = 
+        add_token(<<"{\"properties\":{\"time\":123}}">>, <<"Tom">>),
+    <<"{\"event\":\"lunch\",\"properties\":{\"ip\":\"10.0.0.1\",\"time\":123,\"token\":\"Tanya\"}}">> = 
+        add_token(<<"{\"event\":\"lunch\",\"properties\":{\"ip\":\"10.0.0.1\",\"time\":123}}">>, <<"Tanya">>),
     ok.
 
 -endif.
