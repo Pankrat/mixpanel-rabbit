@@ -56,9 +56,20 @@ handle_info({#'basic.deliver'{delivery_tag = Tag},
             State = #consumer_state{map = Map}) -> 
     Url = mixpanel_url(Payload),
     io:format("DEBUG: ~p~n", [Url]), 
-    {ok, ReqId} = httpc:request(get, {Url, []}, [], [{sync, false}]),
+    {ok, ReqId} = httpc:request(get, {Url, []}, [{timeout, 2000}], [{sync, false}]),
     % Store ReqId->Tag in dict and acknowledge when response is received
     NewState = State#consumer_state{map = dict:store(ReqId, Tag, Map)},
+    {noreply, NewState};
+
+% HTTP error. Most likely a connection or response timeout. Instruct RabbitMQ
+% to put the event back into the queue. TODO: There should be an upper limit
+% for requeuing per message or timeframe.
+handle_info({http, {ReqId, {error, HttpError}}}, 
+            State = #consumer_state{channel = Channel, map = Map}) ->
+    Tag = dict:fetch(ReqId, Map),
+    amqp_channel:cast(Channel, #'basic.reject'{delivery_tag = Tag, requeue = true}),
+    io:format("ERROR [http]: ~p~n", [HttpError]),
+    NewState = State#consumer_state{map = dict:erase(ReqId, Map)},
     {noreply, NewState};
 
 handle_info({http, {ReqId, Result}}, 
