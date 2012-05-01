@@ -1,4 +1,7 @@
-REBAR ?= ./rebar
+REBAR := $(shell which rebar)
+ifeq ($(REBAR),)
+  REBAR=./rebar
+endif
 
 all: deps compile
 

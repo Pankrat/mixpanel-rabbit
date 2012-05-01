@@ -6,9 +6,10 @@ push the JSON representation of your event to a durable RabbitMQ queue called
 `mixpanel`. *mixpanel-rabbit*  inserts your Mixpanel token, base64-encodes the
 data and sends it to Mixpanel.
 
-Erlang and RabbitMQ needs to be installed.
+Erlang (R14) and RabbitMQ (2.8) needs to be installed. Different versions might
+work.
 
-At the moment the queue name is hardwired to "mixpanel".
+The queue name is hardwired to "mixpanel" but can be configured via sys.config.
 
 Usage
 -----
