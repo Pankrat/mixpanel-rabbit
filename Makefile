@@ -11,6 +11,9 @@ deps:
 compile:
 	$(REBAR) compile
 
+examples/client.beam: examples/client.erl
+	erlc -I deps $<
+
 rel: deps mixpanel
 	$(REBAR) clean compile generate
 
