@@ -3,7 +3,7 @@ import pika
 
 from time import sleep
 
-QUEUE = 'test_mp'
+QUEUE = 'mixpanel'
 
 
 def connect():
@@ -11,11 +11,8 @@ def connect():
 
 def open_channel(connection):
     channel = connection.channel()
-    channel.queue_declare(queue=QUEUE, durable=True, exclusive=False, auto_delete=False, callback=callback)
+    channel.queue_declare(queue=QUEUE, durable=True, exclusive=False, auto_delete=False)
     return channel
-
-def callback(*args, **kwargs):
-    import sys; sys.stdout = sys.__stdout__; import ipdb; ipdb.set_trace()
 
 def log_event(channel, event):
     data = dict(event=event, properties=dict())
@@ -23,16 +20,12 @@ def log_event(channel, event):
     properties = pika.BasicProperties(delivery_mode=2)
     channel.basic_publish(exchange='',
                           routing_key=QUEUE,
-                          body="helloworld", #json.dumps(data),
+                          body=json.dumps(data),
                           properties=properties,
                           mandatory=True)
 
 
 connection = connect()
-sleep(1.0)
 channel = open_channel(connection)
-sleep(1.0)
 log_event(channel, "login")
-import sys; sys.stdout = sys.__stdout__; import ipdb; ipdb.set_trace()
-channel.close()
 connection.close()
