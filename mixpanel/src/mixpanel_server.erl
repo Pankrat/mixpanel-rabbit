@@ -6,6 +6,17 @@
 
 -define(QUEUE_NAME, <<"mixpanel">>).
 
+% How many events to transmit in parallel. This limits how many concurrent
+% connections are opened to Mixpanel.
+-define(MAX_CONCURRENT_REQUESTS, 20).
+
+% After a transmission error requeue messages if there are less than the
+% specified amount of messages in the queue. Otherwise drop it.
+-define(REQUEUE_LIMIT, 10000).
+
+% Timeout in milliseconds.
+-define(MIXPANEL_TIMEOUT, 30000).
+
 -record(consumer_state, {connection, channel, map}).
 
 %% ------------------------------------------------------------------
@@ -35,6 +46,8 @@ start_link() ->
 init(_Args) ->
     {ok, Connection} = amqp_connection:start(#amqp_params_network{}), 
     {ok, Channel} = amqp_connection:open_channel(Connection),
+    Qos = #'basic.qos'{prefetch_count = ?MAX_CONCURRENT_REQUESTS},
+    amqp_channel:call(Channel, Qos),
     Qdef = #'queue.declare'{queue = ?QUEUE_NAME, 
                             auto_delete = false,
                             exclusive = false,
@@ -57,7 +70,10 @@ handle_info({#'basic.deliver'{delivery_tag = Tag},
              #amqp_msg{payload = Payload}},
             State = #consumer_state{map = Map}) -> 
     Url = mixpanel_url(Payload),
-    {ok, ReqId} = httpc:request(get, {Url, []}, [{timeout, 30000}], [{sync, false}]),
+    {ok, ReqId} = httpc:request(get, 
+                                {Url, []}, 
+                                [{timeout, ?MIXPANEL_TIMEOUT}], 
+                                [{sync, false}]),
     % Store ReqId->Tag in dict and acknowledge when response is received
     NewState = State#consumer_state{map = dict:store(ReqId, Tag, Map)},
     {noreply, NewState};
@@ -68,7 +84,9 @@ handle_info({#'basic.deliver'{delivery_tag = Tag},
 handle_info({http, {ReqId, {error, HttpError}}}, 
             State = #consumer_state{channel = Channel, map = Map}) ->
     Tag = dict:fetch(ReqId, Map),
-    Requeue = messages_in_queue(Channel) < 100,
+    QueueSize = messages_in_queue(Channel),
+    Requeue = QueueSize < ?REQUEUE_LIMIT,
+    io:format("WARNING [http]: Error=~p QueueSize=~p Requeue=~p~n", [HttpError, QueueSize, Requeue]),
     amqp_channel:cast(Channel, #'basic.reject'{delivery_tag = Tag, requeue = Requeue}),
     NewState = State#consumer_state{map = dict:erase(ReqId, Map)},
     {noreply, NewState};
@@ -77,8 +95,7 @@ handle_info({http, {ReqId, Result}},
             State = #consumer_state{channel = Channel, map = Map}) ->
     Tag = dict:fetch(ReqId, Map),
     amqp_channel:cast(Channel, #'basic.ack'{delivery_tag = Tag}),
-    {{_, Code, _}, _Headers, Body} = Result,
-    io:format("DEBUG [http]: Code=~p Body=~p~n", [Code, Body]),
+    {{_, 200, _}, _Headers, <<"1">>} = Result,
     NewState = State#consumer_state{map = dict:erase(ReqId, Map)},
     {noreply, NewState}.
 

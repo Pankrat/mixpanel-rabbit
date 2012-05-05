@@ -27,5 +27,10 @@ def log_event(channel, event):
 
 connection = connect()
 channel = open_channel(connection)
-log_event(channel, "login")
-connection.close()
+try:
+    while True:
+        log_event(channel, "login")
+        sleep(1.0)
+finally:
+    #channel.close()
+    connection.close()
