@@ -135,10 +135,15 @@ modify_properties(Properties, Token) ->
     Merged = dict:merge(fun(_, V, _) -> V end, Dict, TokenDict),
     dict:to_list(Merged).
 
+fetch_properties({ok, {Prop}}) ->
+    Prop;
+fetch_properties(error) ->
+    [].
+
 add_token(Raw, Token) ->
     {Data} = decode_json(Raw),
     Dict = orddict:from_list(Data),
-    {Prop} = orddict:fetch(<<"properties">>, Dict),
+    Prop = fetch_properties(orddict:find(<<"properties">>, Dict)),
     NewProp = modify_properties(Prop, Token),
     NewDict = orddict:store(<<"properties">>, {NewProp}, Dict),
     NewData = {orddict:to_list(NewDict)},
@@ -170,6 +175,7 @@ add_token_test() ->
         add_token(<<"{\"properties\":{\"time\":123}}">>, <<"Tom">>),
     <<"{\"event\":\"lunch\",\"properties\":{\"ip\":\"10.0.0.1\",\"time\":123,\"token\":\"Tanya\"}}">> = 
         add_token(<<"{\"event\":\"lunch\",\"properties\":{\"ip\":\"10.0.0.1\",\"time\":123}}">>, <<"Tanya">>),
+    decode_json(add_token(<<"{}">>, <<"Theo">>)),
     ok.
 
 messages_in_queue_test() ->

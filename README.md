@@ -9,7 +9,14 @@ data and sends it to Mixpanel.
 Erlang (R14) and RabbitMQ (2.8) needs to be installed. Different versions might
 work.
 
-The queue name is hardwired to "mixpanel" but can be configured via sys.config.
+The queue name is hardwired to "mixpanel".
+
+Features
+--------
+
+  * Transmit multiple events concurrently (asynchronous HTTP requests)
+  * Retry transmission in case of connection problems
+  * Insert Mixpanel token and timestamp if not specified in message
 
 Usage
 -----
