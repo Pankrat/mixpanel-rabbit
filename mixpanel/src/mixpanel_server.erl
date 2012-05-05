@@ -35,8 +35,11 @@ start_link() ->
 init(_Args) ->
     {ok, Connection} = amqp_connection:start(#amqp_params_network{}), 
     {ok, Channel} = amqp_connection:open_channel(Connection),
-    QDeclare = #'queue.declare'{queue = ?QUEUE_NAME, durable = true},
-    #'queue.declare_ok'{queue = Queue} = amqp_channel:call(Channel, QDeclare),
+    Qdef = #'queue.declare'{queue = ?QUEUE_NAME, 
+                            auto_delete = false,
+                            exclusive = false,
+                            durable = true},
+    #'queue.declare_ok'{queue = Queue} = amqp_channel:call(Channel, Qdef),
     amqp_channel:subscribe(Channel, #'basic.consume'{queue = Queue}, self()), 
     Map = dict:new(),
     {ok, #consumer_state{connection = Connection, channel = Channel, map = Map}}.
@@ -54,20 +57,19 @@ handle_info({#'basic.deliver'{delivery_tag = Tag},
              #amqp_msg{payload = Payload}},
             State = #consumer_state{map = Map}) -> 
     Url = mixpanel_url(Payload),
-    io:format("DEBUG: ~p~n", [Url]), 
-    {ok, ReqId} = httpc:request(get, {Url, []}, [{timeout, 2000}], [{sync, false}]),
+    {ok, ReqId} = httpc:request(get, {Url, []}, [{timeout, 30000}], [{sync, false}]),
     % Store ReqId->Tag in dict and acknowledge when response is received
     NewState = State#consumer_state{map = dict:store(ReqId, Tag, Map)},
     {noreply, NewState};
 
 % HTTP error. Most likely a connection or response timeout. Instruct RabbitMQ
-% to put the event back into the queue. TODO: There should be an upper limit
-% for requeuing per message or timeframe.
+% to put the event back into the queue. If there are too many entries in the
+% queue, drop the message.
 handle_info({http, {ReqId, {error, HttpError}}}, 
             State = #consumer_state{channel = Channel, map = Map}) ->
     Tag = dict:fetch(ReqId, Map),
-    amqp_channel:cast(Channel, #'basic.reject'{delivery_tag = Tag, requeue = true}),
-    io:format("ERROR [http]: ~p~n", [HttpError]),
+    Requeue = messages_in_queue(Channel) < 100,
+    amqp_channel:cast(Channel, #'basic.reject'{delivery_tag = Tag, requeue = Requeue}),
     NewState = State#consumer_state{map = dict:erase(ReqId, Map)},
     {noreply, NewState};
 
@@ -97,6 +99,15 @@ decode_json(Json) ->
 
 encode_json(Struct) ->
     jiffy:encode(Struct).
+
+messages_in_queue(Channel) ->
+    Qdef = #'queue.declare'{queue = ?QUEUE_NAME, 
+                            exclusive = false, 
+                            auto_delete = false,
+                            durable = true,
+                            passive = true},
+    #'queue.declare_ok'{message_count = Cnt} = amqp_channel:call(Channel, Qdef),
+    Cnt.
 
 modify_properties(Properties, Token) ->
     Dict = dict:from_list(Properties),
@@ -143,5 +154,14 @@ add_token_test() ->
     <<"{\"event\":\"lunch\",\"properties\":{\"ip\":\"10.0.0.1\",\"time\":123,\"token\":\"Tanya\"}}">> = 
         add_token(<<"{\"event\":\"lunch\",\"properties\":{\"ip\":\"10.0.0.1\",\"time\":123}}">>, <<"Tanya">>),
     ok.
+
+messages_in_queue_test() ->
+    {ok, Connection} = amqp_connection:start(#amqp_params_network{}), 
+    {ok, Channel} = amqp_connection:open_channel(Connection),
+    0 = messages_in_queue(Channel),
+    amqp_channel:close(Channel),
+    amqp_connection:close(Connection),
+    ok.
+
 
 -endif.
