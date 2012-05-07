@@ -6,7 +6,8 @@
   {registered, [mixpanel_sup]},
   {applications, [
                   kernel,
-                  stdlib
+                  stdlib,
+                  inets
                  ]},
   {mod, { mixpanel_app, []}},
   {env, []}
